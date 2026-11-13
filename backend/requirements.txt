@@ -1,0 +1,13 @@
+anthropic==2.8.0
+fastapi==0.162.5
+uvicorn[standard]==0.54.0
+pydantic==2.14.3
+pydantic-settings==2.16.2
+python-dotenv==1.2.4
+python-multipart==0.0.33
+SQLAlchemy==2.1.8
+sqlglot==30.31.0
+
+# Optional drivers for connecting external databases (see README):
+# psycopg[binary]   # PostgreSQL  -> postgresql+psycopg://user:pass@host/db
+# PyMySQL           # MySQL       -> mysql+pymysql://user:pass@host/db
