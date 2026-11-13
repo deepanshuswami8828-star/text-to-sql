@@ -80,6 +80,7 @@ def client(settings: Settings, fake_generator: FakeGenerator) -> Iterator[TestCl
 def client_without_llm(settings: Settings, monkeypatch) -> Iterator[TestClient]:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     app = create_app(settings)
     with TestClient(app) as c:
         yield c

@@ -29,12 +29,20 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # --- AI provider ---
+    # "auto" uses Claude if an Anthropic key is set, otherwise Groq if a Groq key is set.
+    llm_provider: Literal["auto", "anthropic", "groq"] = "auto"
+    max_fix_attempts: int = 2  # how many times the AI may repair a failing query
+
     # --- Claude ---
     anthropic_api_key: str | None = None
     claude_model: str = "claude-opus-5-5"
     claude_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     claude_fallbacks: bool = True
-    max_fix_attempts: int = 2  # how many times Claude may repair a failing query
+
+    # --- Groq (has a free tier) ---
+    groq_api_key: str | None = None
+    groq_model: str = "openai/gpt-oss-120b"
 
     # --- Storage ---
     data_dir: Path = ROOT_DIR / "data"
@@ -53,12 +61,37 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property
-    def llm_enabled(self) -> bool:
+    def has_anthropic_key(self) -> bool:
         return bool(
             self.anthropic_api_key
             or os.environ.get("ANTHROPIC_API_KEY")
             or os.environ.get("ANTHROPIC_AUTH_TOKEN")
         )
+
+    @property
+    def has_groq_key(self) -> bool:
+        return bool(self.groq_api_key or os.environ.get("GROQ_API_KEY"))
+
+    @property
+    def provider(self) -> Literal["anthropic", "groq"] | None:
+        """The AI provider in use, or None when no usable API key is configured."""
+        if self.llm_provider == "anthropic":
+            return "anthropic" if self.has_anthropic_key else None
+        if self.llm_provider == "groq":
+            return "groq" if self.has_groq_key else None
+        if self.has_anthropic_key:
+            return "anthropic"
+        if self.has_groq_key:
+            return "groq"
+        return None
+
+    @property
+    def llm_enabled(self) -> bool:
+        return self.provider is not None
+
+    @property
+    def active_model(self) -> str:
+        return self.groq_model if self.provider == "groq" else self.claude_model
 
     @property
     def use_fallbacks(self) -> bool:

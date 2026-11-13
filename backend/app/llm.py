@@ -1,19 +1,23 @@
-"""Natural language -> SQL with Claude.
+"""Natural language -> SQL with Claude (Anthropic) or Groq.
 
-Uses structured outputs so every response is JSON matching OUTPUT_SCHEMA, and
-prompt caching on the system prompt (instructions + database schema), which is
-identical for every question about the same database.
+Claude uses structured outputs so every response is JSON matching OUTPUT_SCHEMA,
+and prompt caching on the system prompt (instructions + database schema), which
+is identical for every question about the same database. Groq uses JSON mode
+with the same prompt.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Protocol
 
 import anthropic
+import groq
 
 from .config import Settings
 from .schemas import HistoryTurn
@@ -129,14 +133,41 @@ class SQLGenerator(Protocol):
     ) -> Generation: ...
 
 
-def _error_detail(e: anthropic.APIStatusError) -> str:
+def _error_detail(e: Exception) -> str:
     """The human-readable message inside an API error body, without the SDK's wrapper text."""
-    body = e.body
+    body = getattr(e, "body", None)
     if isinstance(body, dict):
-        err = body.get("error")
-        if isinstance(err, dict) and isinstance(err.get("message"), str):
+        err = body.get("error") if isinstance(body.get("error"), dict) else body
+        if isinstance(err.get("message"), str):
             return err["message"]
-    return e.message
+    return str(getattr(e, "message", e))
+
+
+def parse_answer(text: str) -> dict[str, Any]:
+    """Parse the model's JSON answer, tolerating code fences or reasoning text around it."""
+    cleaned = re.sub(r"<think>.*?</think>", "", text or "", flags=re.S).strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start == -1 or end <= start:
+            raise LLMError("The AI returned a malformed answer. Try again.", 502) from None
+        try:
+            data = json.loads(cleaned[start : end + 1])
+        except json.JSONDecodeError:
+            raise LLMError("The AI returned a malformed answer. Try again.", 502) from None
+    if not isinstance(data, dict):
+        raise LLMError("The AI returned a malformed answer. Try again.", 502)
+    return data
+
+
+def _to_generation(data: dict[str, Any], raw_content: Any) -> Generation:
+    return Generation(
+        answerable=bool(data.get("answerable")),
+        sql=str(data.get("sql") or "").strip(),
+        explanation=str(data.get("explanation") or "").strip(),
+        raw_content=raw_content,
+    )
 
 
 def build_system_prompt(dialect: str, schema: str) -> str:
@@ -248,11 +279,7 @@ class ClaudeSQLGenerator:
         text = next((b.text for b in response.content if b.type == "text"), None)
         if text is None:
             raise LLMError("Claude returned no answer. Try again.", 502)
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as e:
-            log.warning("Unparseable model output: %r", text[:500])
-            raise LLMError("Claude returned a malformed answer. Try again.", 502) from e
+        data = parse_answer(text)
 
         usage = response.usage
         log.info(
@@ -260,9 +287,92 @@ class ClaudeSQLGenerator:
             response.model, usage.input_tokens, getattr(usage, "cache_read_input_tokens", None),
             usage.output_tokens,
         )
-        return Generation(
-            answerable=bool(data.get("answerable")),
-            sql=str(data.get("sql") or "").strip(),
-            explanation=str(data.get("explanation") or "").strip(),
-            raw_content=response.content,
-        )
+        return _to_generation(data, response.content)
+
+
+JSON_INSTRUCTION = """
+Reply with only a JSON object and no other text, in exactly this shape:
+{"answerable": true, "sql": "SELECT ...", "explanation": "..."}
+"""
+
+
+class GroqSQLGenerator:
+    """Uses Groq's API (free tier available) with open models such as gpt-oss or Llama."""
+
+    def __init__(self, settings: Settings, client: groq.Groq | None = None):
+        self.settings = settings
+        self._client = client
+
+    @property
+    def client(self) -> groq.Groq:
+        if self._client is None:
+            self._client = groq.Groq(
+                api_key=self.settings.groq_api_key or os.environ.get("GROQ_API_KEY"),
+                timeout=120.0,
+                max_retries=2,
+            )
+        return self._client
+
+    def generate(
+        self,
+        *,
+        dialect: str,
+        schema: str,
+        question: str,
+        history: list[HistoryTurn],
+        failures: list[Failure],
+    ) -> Generation:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": build_system_prompt(dialect, schema) + JSON_INSTRUCTION},
+            {"role": "user", "content": build_user_message(question, history)},
+        ]
+        for failure in failures:
+            messages.append({"role": "assistant", "content": failure.generation.raw_content})
+            messages.append({"role": "user", "content": repair_message(failure.error)})
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.settings.groq_model,
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0.1,
+                max_completion_tokens=8192,
+            )
+        except groq.AuthenticationError as e:
+            raise LLMError("The Groq API key was rejected. Check GROQ_API_KEY in your .env file.", 502) from e
+        except groq.NotFoundError as e:
+            raise LLMError(f"Groq model '{self.settings.groq_model}' was not found. Check GROQ_MODEL.", 502) from e
+        except groq.RateLimitError as e:
+            raise LLMError(
+                "Groq's free-tier limit was reached. Wait a minute and try again.", 429
+            ) from e
+        except groq.BadRequestError as e:
+            detail = _error_detail(e)
+            if "json" in detail.lower():
+                raise LLMError("The AI returned a malformed answer. Try again or rephrase the question.", 502) from e
+            raise LLMError(f"Groq rejected the request: {detail}", 502) from e
+        except groq.APIStatusError as e:
+            raise LLMError(f"Groq API error ({e.status_code}). Try again shortly.", 502) from e
+        except groq.APIConnectionError as e:
+            raise LLMError("Couldn't reach the Groq API. Check your internet connection.", 502) from e
+
+        if not response.choices:
+            raise LLMError("The AI returned no answer. Try again.", 502)
+        choice = response.choices[0]
+        if choice.finish_reason == "length":
+            raise LLMError("The AI's answer was cut off. Try a simpler or more specific question.", 502)
+        text = choice.message.content or ""
+        data = parse_answer(text)
+        if response.usage:
+            log.info(
+                "groq model=%s input=%s output=%s",
+                response.model, response.usage.prompt_tokens, response.usage.completion_tokens,
+            )
+        return _to_generation(data, text)
+
+
+def make_generator(settings: Settings) -> SQLGenerator:
+    """Build the generator for the configured provider."""
+    if settings.provider == "groq":
+        return GroqSQLGenerator(settings)
+    return ClaudeSQLGenerator(settings)

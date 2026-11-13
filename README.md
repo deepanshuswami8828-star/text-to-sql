@@ -1,8 +1,9 @@
 # Text-to-SQL
 
 Ask questions about your data in plain English and get the answer as a table or a chart.
-[Claude](https://www.anthropic.com/claude) writes the SQL, the app checks that it only reads data, runs it,
-and fixes the query by itself if the database returns an error.
+An AI model writes the SQL ([Claude](https://www.anthropic.com/claude), or a free model through
+[Groq](https://console.groq.com/)), the app checks that it only reads data, runs it, and fixes the query by itself
+if the database returns an error.
 
 It's a website that runs on your computer: start it and open **http://localhost:8000** in Chrome (or any browser).
 
@@ -11,7 +12,8 @@ It's a website that runs on your computer: start it and open **http://localhost:
 ## Features
 
 - **Plain-English questions → SQL.** Follow-up questions ("now only for Mumbai") use the conversation so far.
-- **Self-correcting.** If a query fails, Claude sees the error and repairs it (up to 2 times by default).
+- **Self-correcting.** If a query fails, the AI sees the error and repairs it (up to 2 times by default).
+- **Free or paid AI.** Use Claude for the best answers, or Groq's free tier at no cost.
 - **Read-only by design.** Only single `SELECT` queries are allowed, the database connection itself is read-only,
   queries time out after 15 seconds and results are capped at 1,000 rows.
 - **Editable SQL.** Every answer shows the SQL in an editor with highlighting and autocomplete. Change it and press Run.
@@ -27,8 +29,14 @@ It's a website that runs on your computer: start it and open **http://localhost:
 
 ## Quick start
 
-You need **Python 3.11+** and **Node.js 20+**. Get a Claude API key from the
-[Anthropic Console](https://console.anthropic.com/).
+You need **Python 3.11+** and **Node.js 20+**, plus one API key:
+
+| Provider | Cost | Get a key | Put in `.env` |
+| --- | --- | --- | --- |
+| **Groq** | Free tier (rate-limited) | [console.groq.com/keys](https://console.groq.com/keys) | `GROQ_API_KEY=...` |
+| **Claude** | Paid, best quality | [console.anthropic.com](https://console.anthropic.com/) | `ANTHROPIC_API_KEY=...` |
+
+If both keys are set, Claude is used; add `LLM_PROVIDER=groq` to use Groq instead.
 
 ### Windows (one click)
 
@@ -97,11 +105,14 @@ All settings go in `.env` (see [`.env.example`](.env.example)).
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | – | Your Claude API key. Without it, only *Write SQL* mode works. |
+| `ANTHROPIC_API_KEY` | – | Claude API key (paid). |
+| `GROQ_API_KEY` | – | Groq API key (free tier). Without any key, only *Write SQL* mode works. |
+| `LLM_PROVIDER` | `auto` | `auto` (Claude if its key is set, else Groq), `anthropic`, or `groq`. |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model used to write SQL. |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Claude model used to write SQL. |
 | `CLAUDE_EFFORT` | `medium` | How hard Claude thinks: `low`, `medium`, `high`, `xhigh`, `max`. Higher is slower but better on hard questions. |
 | `CLAUDE_FALLBACKS` | `true` | If the model declines a request, retry on a fallback model automatically. |
-| `MAX_FIX_ATTEMPTS` | `2` | How many times Claude may repair a failing query. |
+| `MAX_FIX_ATTEMPTS` | `2` | How many times the AI may repair a failing query. |
 | `MAX_ROWS` | `1000` | Most rows returned per query. |
 | `QUERY_TIMEOUT_SECONDS` | `15` | Queries running longer are stopped. |
 | `MAX_UPLOAD_MB` | `50` | Largest file you can upload. |
@@ -111,7 +122,7 @@ All settings go in `.env` (see [`.env.example`](.env.example)).
 ## How it works
 
 ```
-Browser (React)  ──question──▶  FastAPI  ──schema + question──▶  Claude
+Browser (React)  ──question──▶  FastAPI  ──schema + question──▶  Claude or Groq
                                    │  ◀────── JSON {sql, explanation} ──┘
                                    ▼
                           SQL safety check (sqlglot)
@@ -140,7 +151,7 @@ Browser (React)  ──question──▶  FastAPI  ──schema + question──
 backend/
   app/
     main.py        API routes; also serves the built website
-    llm.py         Claude prompt, structured output, error handling
+    llm.py         prompt, Claude and Groq clients, JSON answers, error handling
     service.py     question → SQL → result pipeline with auto-repair
     database.py    database registry, schema reading, read-only execution, uploads
     sql_guard.py   read-only SQL validation
@@ -178,7 +189,7 @@ Tests and checks:
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-pytest                          # 80 tests: SQL safety, schema reading, CSV import, API, Claude request format
+pytest                          # 96 tests: SQL safety, schema reading, CSV import, API, Claude + Groq requests
 ruff check .
 
 cd ../frontend
@@ -205,7 +216,7 @@ Interactive API docs are at **http://localhost:8000/docs** while the server is r
 
 ## Before putting it on the internet
 
-The app has no login. Anyone who can open it can ask questions (which uses your Claude API credits), upload files,
+The app has no login. Anyone who can open it can ask questions (which uses your API credits or free quota), upload files,
 and read every connected database. Run it on your own machine or a private network, or put it behind a login
 (for example a reverse proxy with authentication) before exposing it publicly.
 

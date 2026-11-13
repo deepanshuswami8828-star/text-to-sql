@@ -16,7 +16,7 @@ from .config import Settings, get_settings
 from .database import SAMPLE_ID, DatabaseNotFound, DatabaseRegistry, QueryError
 from .history import HistoryStore
 from .importer import UploadError
-from .llm import ClaudeSQLGenerator, LLMError, SQLGenerator
+from .llm import LLMError, SQLGenerator, make_generator
 from .schemas import (
     DatabaseOut,
     ExecuteRequest,
@@ -46,9 +46,13 @@ def create_app(settings: Settings | None = None, generator: SQLGenerator | None 
         registry.refresh()
         app.state.registry = registry
         app.state.history = HistoryStore(settings.app_db_path)
-        app.state.generator = generator or ClaudeSQLGenerator(settings)
-        if not settings.llm_enabled and generator is None:
-            log.warning("ANTHROPIC_API_KEY is not set: natural-language questions are disabled.")
+        app.state.generator = generator or make_generator(settings)
+        if generator is None:
+            if settings.llm_enabled:
+                log.info("AI provider: %s (model %s)", settings.provider, settings.active_model)
+            else:
+                log.warning("No AI API key set (ANTHROPIC_API_KEY or GROQ_API_KEY): "
+                            "natural-language questions are disabled.")
         yield
 
     app = FastAPI(title="Text-to-SQL", version=__version__, lifespan=lifespan)
@@ -89,7 +93,8 @@ def create_app(settings: Settings | None = None, generator: SQLGenerator | None 
         llm_enabled = settings.llm_enabled or generator is not None
         return HealthOut(
             llm_enabled=llm_enabled,
-            model=settings.claude_model,
+            provider=settings.provider,
+            model=settings.active_model,
             max_rows=settings.max_rows,
             version=__version__,
         )
@@ -133,7 +138,8 @@ def create_app(settings: Settings | None = None, generator: SQLGenerator | None 
         if not (settings.llm_enabled or generator is not None):
             raise HTTPException(
                 status_code=503,
-                detail="Add your ANTHROPIC_API_KEY to the .env file to ask questions in plain English. "
+                detail="Add an API key to the .env file to ask questions in plain English: "
+                       "ANTHROPIC_API_KEY for Claude, or GROQ_API_KEY for Groq's free tier. "
                        "You can still write and run SQL yourself.",
             )
         reg = registry(request)

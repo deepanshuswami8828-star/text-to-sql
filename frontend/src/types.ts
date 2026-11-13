@@ -89,6 +89,7 @@ export interface HistoryItem {
 export interface Health {
   status: "ok";
   llm_enabled: boolean;
+  provider: "anthropic" | "groq" | null;
   model: string;
   max_rows: number;
   version: string;

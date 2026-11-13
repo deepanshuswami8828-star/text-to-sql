@@ -55,6 +55,7 @@ export default function App() {
   const turns = useMemo(() => (dbId ? turnsByDb[dbId] ?? [] : []), [turnsByDb, dbId]);
   const busy = turns.some((t) => t.status === "thinking");
   const llmEnabled = !!health?.llm_enabled;
+  const aiName = health?.provider === "groq" ? "Groq" : health?.provider === "anthropic" ? "Claude" : "AI";
 
   // ---------- theme ----------
   useEffect(() => {
@@ -329,9 +330,9 @@ export default function App() {
           </button>
           <span
             className={"status-pill " + (llmEnabled ? "on" : "off")}
-            title={llmEnabled ? `Using ${health?.model}` : "Set ANTHROPIC_API_KEY in .env to enable AI questions"}
+            title={llmEnabled ? `Using ${health?.model}` : "Set ANTHROPIC_API_KEY or GROQ_API_KEY in .env to enable AI questions"}
           >
-            <span className="dot" /> <span className="hide-sm">{llmEnabled ? "Claude ready" : "AI off"}</span>
+            <span className="dot" /> <span className="hide-sm">{llmEnabled ? `${aiName} ready` : "AI off"}</span>
           </span>
           <button
             className="icon-btn"
@@ -370,16 +371,16 @@ export default function App() {
               <section className="welcome">
                 <h1>Ask your data anything</h1>
                 <p className="muted">
-                  {db?.description ? db.description.replace(/([^.!?])$/, "$1.") : "Type a question in plain English."} Claude
-                  writes the SQL, runs it read-only, and shows the answer as a table or chart.
+                  {db?.description ? db.description.replace(/([^.!?])$/, "$1.") : "Type a question in plain English."}{" "}
+                  {aiName} writes the SQL, the app runs it read-only, and you get the answer as a table or chart.
                 </p>
                 {!llmEnabled && health && (
                   <div className="notice info">
                     <div>
                       <strong>AI questions are turned off.</strong>
                       <p>
-                        Add <code>ANTHROPIC_API_KEY=…</code> to the <code>.env</code> file and restart the server. You can still
-                        browse the schema and run your own SQL.
+                        Add <code>GROQ_API_KEY=…</code> (free) or <code>ANTHROPIC_API_KEY=…</code> to the <code>.env</code>{" "}
+                        file and restart the server. You can still browse the schema and run your own SQL.
                       </p>
                     </div>
                   </div>

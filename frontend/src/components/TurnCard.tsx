@@ -121,7 +121,7 @@ export function TurnCard({ turn, schema, dialect, theme, onRun }: Props) {
                   <Wrench size={14} />
                   <div>
                     <button className="link-btn" onClick={() => setShowAttempts((s) => !s)}>
-                      Claude fixed {turn.attempts.length} error{turn.attempts.length > 1 ? "s" : ""} automatically
+                      Fixed {turn.attempts.length} error{turn.attempts.length > 1 ? "s" : ""} automatically
                       {showAttempts ? " (hide)" : " (show)"}
                     </button>
                     {showAttempts &&

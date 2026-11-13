@@ -124,6 +124,7 @@ class HistoryUpdate(BaseModel):
 class HealthOut(BaseModel):
     status: Literal["ok"] = "ok"
     llm_enabled: bool
+    provider: Literal["anthropic", "groq"] | None = None
     model: str
     max_rows: int
     version: str

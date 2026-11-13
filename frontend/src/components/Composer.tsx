@@ -69,7 +69,7 @@ export function Composer(props: Props) {
             placeholder={
               llmEnabled
                 ? "Ask a question about your data, e.g. “Which city has the most orders?”"
-                : "Add ANTHROPIC_API_KEY to .env to ask in plain English, or switch to Write SQL"
+                : "Add an API key to .env to ask in plain English, or switch to Write SQL"
             }
             disabled={!llmEnabled}
             onKeyDown={(e) => {
