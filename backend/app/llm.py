@@ -129,6 +129,16 @@ class SQLGenerator(Protocol):
     ) -> Generation: ...
 
 
+def _error_detail(e: anthropic.APIStatusError) -> str:
+    """The human-readable message inside an API error body, without the SDK's wrapper text."""
+    body = e.body
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict) and isinstance(err.get("message"), str):
+            return err["message"]
+    return e.message
+
+
 def build_system_prompt(dialect: str, schema: str) -> str:
     label = DIALECT_LABELS.get(dialect, dialect)
     return SYSTEM_TEMPLATE.format(dialect=label, schema=schema, tips=DIALECT_TIPS.get(dialect, ""))
@@ -217,7 +227,14 @@ class ClaudeSQLGenerator:
         except anthropic.RateLimitError as e:
             raise LLMError("Claude is rate limiting requests right now. Wait a moment and try again.", 429) from e
         except anthropic.BadRequestError as e:
-            raise LLMError(f"Claude rejected the request: {e.message}", 502) from e
+            detail = _error_detail(e)
+            if "credit balance" in detail.lower():
+                raise LLMError(
+                    "Your Anthropic account is out of credits. Add credits in the Anthropic Console "
+                    "(Plans & Billing), then try again.",
+                    402,
+                ) from e
+            raise LLMError(f"Claude rejected the request: {detail}", 502) from e
         except anthropic.APIStatusError as e:
             raise LLMError(f"Claude API error ({e.status_code}). Try again shortly.", 502) from e
         except anthropic.APIConnectionError as e:

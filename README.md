@@ -178,7 +178,7 @@ Tests and checks:
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-pytest                          # 78 tests: SQL safety, schema reading, CSV import, API, Claude request format
+pytest                          # 80 tests: SQL safety, schema reading, CSV import, API, Claude request format
 ruff check .
 
 cd ../frontend

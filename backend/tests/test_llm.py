@@ -133,6 +133,24 @@ def test_api_errors_are_mapped(status, expected_status, needle):
     assert needle in exc.value.message
 
 
+def test_out_of_credits_is_explained_plainly():
+    body = {"type": "error", "error": {"type": "invalid_request_error",
+                                       "message": "Your credit balance is too low to access the Anthropic API."}}
+    rec = Recorder([httpx2.Response(400, json=body)])
+    with pytest.raises(LLMError) as exc:
+        _generator(rec).generate(dialect="sqlite", schema="", question="q", history=[], failures=[])
+    assert exc.value.status_code == 402
+    assert exc.value.message.startswith("Your Anthropic account is out of credits")
+
+
+def test_other_bad_requests_show_only_the_inner_message():
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": "max_tokens is too large"}}
+    rec = Recorder([httpx2.Response(400, json=body)])
+    with pytest.raises(LLMError) as exc:
+        _generator(rec).generate(dialect="sqlite", schema="", question="q", history=[], failures=[])
+    assert exc.value.message == "Claude rejected the request: max_tokens is too large"
+
+
 def test_prompt_builders():
     assert "PostgreSQL" in build_system_prompt("postgresql", "x")
     msg = build_user_message("How many?", [], today=date(2026, 1, 2))
