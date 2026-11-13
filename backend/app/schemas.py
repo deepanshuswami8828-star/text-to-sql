@@ -66,6 +66,8 @@ class GenerateRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     history: list[HistoryTurn] = Field(default_factory=list, max_length=10)
     execute: bool = True
+    # If the selected database can't answer, look for another database that can.
+    auto_route: bool = True
 
 
 class Attempt(BaseModel):
@@ -75,6 +77,8 @@ class Attempt(BaseModel):
 
 class GenerateResponse(BaseModel):
     question: str
+    database_id: str  # the database that was actually queried
+    routed_from: str | None = None  # set when the selected database couldn't answer and another one did
     answerable: bool
     sql: str
     explanation: str

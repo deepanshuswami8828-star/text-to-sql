@@ -11,7 +11,7 @@ from app.sql_guard import UnsafeSQLError
 
 def test_sample_databases_are_registered(registry: DatabaseRegistry):
     ids = [d.id for d in registry.list()]
-    assert ids == ["ecommerce", "school"]
+    assert ids == ["company", "ecommerce", "government", "school"]
     assert registry.get("ecommerce").kind == "sample"
     assert registry.get("school").name == "School (sample)"
 

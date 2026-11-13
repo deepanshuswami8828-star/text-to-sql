@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     # --- AI provider ---
     # "auto" uses Claude if an Anthropic key is set, otherwise Groq if a Groq key is set.
     llm_provider: Literal["auto", "anthropic", "groq"] = "auto"
-    max_fix_attempts: int = 2  # how many times the AI may repair a failing query
+    max_fix_attempts: int = 3  # how many times the AI may repair a failing query
+    auto_route: bool = True  # answer from another database when the selected one lacks the data
 
     # --- Claude ---
     anthropic_api_key: str | None = None
@@ -43,6 +44,8 @@ class Settings(BaseSettings):
     # --- Groq (has a free tier) ---
     groq_api_key: str | None = None
     groq_model: str = "openai/gpt-oss-120b"
+    # Used when the main model is rate-limited or fails (each model has its own free-tier limit).
+    groq_fallback_model: str = "openai/gpt-oss-20b"
 
     # --- Storage ---
     data_dir: Path = ROOT_DIR / "data"

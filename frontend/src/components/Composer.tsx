@@ -68,7 +68,7 @@ export function Composer(props: Props) {
             onChange={(e) => onQuestionChange(e.target.value)}
             placeholder={
               llmEnabled
-                ? "Ask a question about your data, e.g. “Which city has the most orders?”"
+                ? "Ask a question about your data, in English or Hinglish"
                 : "Add an API key to .env to ask in plain English, or switch to Write SQL"
             }
             disabled={!llmEnabled}

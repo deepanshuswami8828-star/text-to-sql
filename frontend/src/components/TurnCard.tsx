@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ArrowRightLeft,
   BarChart3,
   Check,
   Copy,
@@ -26,9 +27,11 @@ interface Props {
   dialect: string;
   theme: Theme;
   onRun: (turn: Turn, sql: string) => void;
+  dbName: (id: string) => string;
+  onSwitchDb: (turn: Turn) => void;
 }
 
-export function TurnCard({ turn, schema, dialect, theme, onRun }: Props) {
+export function TurnCard({ turn, schema, dialect, theme, onRun, dbName, onSwitchDb }: Props) {
   const [sql, setSql] = useState(turn.sql);
   const [view, setView] = useState<"table" | "chart">("table");
   const [copied, setCopied] = useState(false);
@@ -97,6 +100,18 @@ export function TurnCard({ turn, schema, dialect, theme, onRun }: Props) {
 
           {turn.status !== "thinking" && turn.answerable !== false && (
             <>
+              {turn.routedFrom && turn.queryDb && (
+                <div className="notice routed">
+                  <ArrowRightLeft size={15} />
+                  <span>
+                    Answered from <strong>{dbName(turn.queryDb)}</strong>, because {dbName(turn.routedFrom)} doesn't have
+                    this data.
+                  </span>
+                  <button className="ghost-btn" onClick={() => onSwitchDb(turn)}>
+                    Switch to {dbName(turn.queryDb)}
+                  </button>
+                </div>
+              )}
               {turn.explanation && <p className="explanation">{turn.explanation}</p>}
 
               {(turn.sql || turn.mode === "sql") && (

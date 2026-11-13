@@ -13,6 +13,8 @@ import pytest
 from app.config import Settings
 from app.llm import (
     OUTPUT_SCHEMA,
+    ROUTE_SCHEMA,
+    ROUTE_SYSTEM,
     ClaudeSQLGenerator,
     Failure,
     LLMError,
@@ -149,6 +151,15 @@ def test_other_bad_requests_show_only_the_inner_message():
     with pytest.raises(LLMError) as exc:
         _generator(rec).generate(dialect="sqlite", schema="", question="q", history=[], failures=[])
     assert exc.value.message == "Claude rejected the request: max_tokens is too large"
+
+
+def test_route_request_uses_low_effort_and_route_schema():
+    rec = Recorder([_ok({"database_id": "school"})])
+    assert _generator(rec).route(question="average marks", catalog="- id: school") == "school"
+    body = rec.body()
+    assert body["output_config"] == {"effort": "low", "format": {"type": "json_schema", "schema": ROUTE_SCHEMA}}
+    assert body["system"] == ROUTE_SYSTEM
+    assert "- id: school" in body["messages"][0]["content"]
 
 
 def test_prompt_builders():

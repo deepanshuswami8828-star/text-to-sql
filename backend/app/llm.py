@@ -100,10 +100,11 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 class LLMError(Exception):
     """Claude could not produce SQL. `status_code` is what the API route should return."""
 
-    def __init__(self, message: str, status_code: int = 502):
+    def __init__(self, message: str, status_code: int = 502, retryable: bool = False):
         super().__init__(message)
         self.message = message
         self.status_code = status_code
+        self.retryable = retryable  # worth retrying with a different model
 
 
 @dataclass
@@ -131,6 +132,28 @@ class SQLGenerator(Protocol):
         history: list[HistoryTurn],
         failures: list[Failure],
     ) -> Generation: ...
+
+    def route(self, *, question: str, catalog: str) -> str | None:
+        """Return the id of the database (from `catalog`) that can answer `question`, or None."""
+        ...
+
+
+ROUTE_SYSTEM = """\
+You decide which database can answer a question. Each database is listed with its id, a short \
+description, and its tables and columns. Pick the one whose tables hold the data the question needs. \
+The question may be in English, Hindi or Hinglish. If none of the databases has that data, pick none.
+Reply with only a JSON object: {"database_id": "<id>"}, or {"database_id": ""} if none fits."""
+
+ROUTE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"database_id": {"type": "string", "description": "Database id, or empty string if none fits."}},
+    "required": ["database_id"],
+    "additionalProperties": False,
+}
+
+
+def route_message(question: str, catalog: str) -> str:
+    return f"Databases:\n{catalog}\n\nQuestion: {question}"
 
 
 def _error_detail(e: Exception) -> str:
@@ -227,21 +250,29 @@ class ClaudeSQLGenerator:
             messages.append({"role": "assistant", "content": failure.generation.raw_content})
             messages.append({"role": "user", "content": repair_message(failure.error)})
 
+        system = [{"type": "text", "text": build_system_prompt(dialect, schema), "cache_control": {"type": "ephemeral"}}]
+        text, content = self._create(
+            system=system, messages=messages, effort=self.settings.claude_effort, schema=OUTPUT_SCHEMA,
+            max_tokens=16000,
+        )
+        return _to_generation(parse_answer(text), content)
+
+    def route(self, *, question: str, catalog: str) -> str | None:
+        text, _ = self._create(
+            system=ROUTE_SYSTEM, messages=[{"role": "user", "content": route_message(question, catalog)}],
+            effort="low", schema=ROUTE_SCHEMA, max_tokens=4000,
+        )
+        return str(parse_answer(text).get("database_id") or "").strip() or None
+
+    def _create(self, *, system: Any, messages: list[dict[str, Any]], effort: str, schema: dict[str, Any],
+                max_tokens: int) -> tuple[str, Any]:
+        """Call Claude with a JSON-schema answer format; return (answer text, content blocks)."""
         params: dict[str, Any] = {
             "model": self.settings.claude_model,
-            "max_tokens": 16000,
-            "system": [
-                {
-                    "type": "text",
-                    "text": build_system_prompt(dialect, schema),
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
+            "max_tokens": max_tokens,
+            "system": system,
             "messages": messages,
-            "output_config": {
-                "effort": self.settings.claude_effort,
-                "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA},
-            },
+            "output_config": {"effort": effort, "format": {"type": "json_schema", "schema": schema}},
         }
         if self.settings.use_fallbacks:
             params["betas"] = [FALLBACK_BETA]
@@ -279,7 +310,6 @@ class ClaudeSQLGenerator:
         text = next((b.text for b in response.content if b.type == "text"), None)
         if text is None:
             raise LLMError("Claude returned no answer. Try again.", 502)
-        data = parse_answer(text)
 
         usage = response.usage
         log.info(
@@ -287,7 +317,7 @@ class ClaudeSQLGenerator:
             response.model, usage.input_tokens, getattr(usage, "cache_read_input_tokens", None),
             usage.output_tokens,
         )
-        return _to_generation(data, response.content)
+        return text, response.content
 
 
 JSON_INSTRUCTION = """
@@ -299,9 +329,10 @@ Reply with only a JSON object and no other text, in exactly this shape:
 class GroqSQLGenerator:
     """Uses Groq's API (free tier available) with open models such as gpt-oss or Llama."""
 
-    def __init__(self, settings: Settings, client: groq.Groq | None = None):
+    def __init__(self, settings: Settings, client: groq.Groq | None = None, patient_retries: int = 2):
         self.settings = settings
         self._client = client
+        self.patient_retries = patient_retries
 
     @property
     def client(self) -> groq.Groq:
@@ -309,7 +340,6 @@ class GroqSQLGenerator:
             self._client = groq.Groq(
                 api_key=self.settings.groq_api_key or os.environ.get("GROQ_API_KEY"),
                 timeout=120.0,
-                max_retries=2,
             )
         return self._client
 
@@ -330,45 +360,90 @@ class GroqSQLGenerator:
             messages.append({"role": "assistant", "content": failure.generation.raw_content})
             messages.append({"role": "user", "content": repair_message(failure.error)})
 
+        data, text = self._complete_json(messages)
+        return _to_generation(data, text)
+
+    def route(self, *, question: str, catalog: str) -> str | None:
+        messages = [
+            {"role": "system", "content": ROUTE_SYSTEM},
+            {"role": "user", "content": route_message(question, catalog)},
+        ]
+        data, _ = self._complete_json(messages, max_tokens=2048)
+        return str(data.get("database_id") or "").strip() or None
+
+    def _models(self) -> list[str]:
+        models = [self.settings.groq_model]
+        fallback = self.settings.groq_fallback_model
+        if fallback and fallback != self.settings.groq_model:
+            models.append(fallback)
+        return models
+
+    def _complete_json(self, messages: list[dict[str, Any]], max_tokens: int = 8192) -> tuple[dict[str, Any], str]:
+        """Ask for a JSON answer. If the main model is rate-limited, down, or answers badly, switch to the
+        fallback model right away (each Groq model has its own free-tier limit). Only if every model is
+        rate-limited, make one patient attempt that waits for the limit to reset."""
+        models = self._models()
+        last_error: LLMError | None = None
+        for model in models:
+            try:
+                return self._complete_once(model, messages, max_tokens, retries=0)
+            except LLMError as e:
+                if not e.retryable:
+                    raise
+                last_error = e
+                log.warning("groq model %s failed (%s)", model, e.message)
+        assert last_error is not None
+        if last_error.status_code == 429 and self.patient_retries > 0:
+            log.info("all groq models are rate-limited; waiting for the limit to reset")
+            return self._complete_once(models[0], messages, max_tokens, retries=self.patient_retries)
+        raise last_error
+
+    def _complete_once(self, model: str, messages: list[dict[str, Any]], max_tokens: int,
+                       retries: int) -> tuple[dict[str, Any], str]:
         try:
-            response = self.client.chat.completions.create(
-                model=self.settings.groq_model,
+            # The SDK honours the Retry-After header when it retries a rate-limited request.
+            response = self.client.with_options(max_retries=retries).chat.completions.create(
+                model=model,
                 messages=messages,
                 response_format={"type": "json_object"},
                 temperature=0.1,
-                max_completion_tokens=8192,
+                max_completion_tokens=max_tokens,
             )
         except groq.AuthenticationError as e:
             raise LLMError("The Groq API key was rejected. Check GROQ_API_KEY in your .env file.", 502) from e
         except groq.NotFoundError as e:
-            raise LLMError(f"Groq model '{self.settings.groq_model}' was not found. Check GROQ_MODEL.", 502) from e
+            raise LLMError(f"Groq model '{model}' was not found. Check GROQ_MODEL.", 502, retryable=True) from e
         except groq.RateLimitError as e:
-            raise LLMError(
-                "Groq's free-tier limit was reached. Wait a minute and try again.", 429
-            ) from e
+            raise LLMError("Groq's free-tier limit was reached. Wait a minute and try again.", 429,
+                           retryable=True) from e
         except groq.BadRequestError as e:
             detail = _error_detail(e)
             if "json" in detail.lower():
-                raise LLMError("The AI returned a malformed answer. Try again or rephrase the question.", 502) from e
+                raise LLMError("The AI returned a malformed answer. Try again or rephrase the question.", 502,
+                               retryable=True) from e
             raise LLMError(f"Groq rejected the request: {detail}", 502) from e
         except groq.APIStatusError as e:
-            raise LLMError(f"Groq API error ({e.status_code}). Try again shortly.", 502) from e
+            raise LLMError(f"Groq API error ({e.status_code}). Try again shortly.", 502,
+                           retryable=e.status_code >= 500) from e
         except groq.APIConnectionError as e:
             raise LLMError("Couldn't reach the Groq API. Check your internet connection.", 502) from e
 
         if not response.choices:
-            raise LLMError("The AI returned no answer. Try again.", 502)
+            raise LLMError("The AI returned no answer. Try again.", 502, retryable=True)
         choice = response.choices[0]
         if choice.finish_reason == "length":
-            raise LLMError("The AI's answer was cut off. Try a simpler or more specific question.", 502)
+            raise LLMError("The AI's answer was cut off. Try a simpler or more specific question.", 502,
+                           retryable=True)
         text = choice.message.content or ""
-        data = parse_answer(text)
+        try:
+            data = parse_answer(text)
+        except LLMError as e:
+            e.retryable = True
+            raise
         if response.usage:
-            log.info(
-                "groq model=%s input=%s output=%s",
-                response.model, response.usage.prompt_tokens, response.usage.completion_tokens,
-            )
-        return _to_generation(data, text)
+            log.info("groq model=%s input=%s output=%s",
+                     response.model, response.usage.prompt_tokens, response.usage.completion_tokens)
+        return data, text
 
 
 def make_generator(settings: Settings) -> SQLGenerator:

@@ -12,7 +12,9 @@ It's a website that runs on your computer: start it and open **http://localhost:
 ## Features
 
 - **Plain-English questions → SQL.** Follow-up questions ("now only for Mumbai") use the conversation so far.
-- **Self-correcting.** If a query fails, the AI sees the error and repairs it (up to 2 times by default).
+- **Finds the right database.** Ask about students while the E-commerce database is selected, and the app answers
+  from the School database instead, telling you where the answer came from.
+- **Self-correcting.** If a query fails, the AI sees the error and repairs it (up to 3 times by default).
 - **Free or paid AI.** Use Claude for the best answers, or Groq's free tier at no cost.
 - **Read-only by design.** Only single `SELECT` queries are allowed, the database connection itself is read-only,
   queries time out after 15 seconds and results are capped at 1,000 rows.
@@ -23,9 +25,12 @@ It's a website that runs on your computer: start it and open **http://localhost:
 - **Schema browser** with tables, columns, keys, relationships and one-click previews.
 - **History** of every question and query, with stars for the ones you want to keep.
 - **Light and dark themes**, works on phones too.
-- Ships with **two sample databases** so you can try it immediately:
+- Ships with **four sample databases** so you can try it immediately:
   - **E-commerce**: customers, products, orders, employees and reviews (prices in INR)
   - **School**: students, classes, subjects, teachers, exam marks and monthly attendance for 2025-26
+  - **Company**: a fictional IT company's employees, departments, salaries and payroll, projects, leaves and reviews
+  - **Government**: Indian states and districts, welfare scheme budgets, hospitals and citizen grievances
+    (practice data: figures are approximate or synthetic, **not official statistics**)
 
 ![Dark theme with a results table](docs/answer-table-dark.png)
 
@@ -111,10 +116,12 @@ All settings go in `.env` (see [`.env.example`](.env.example)).
 | `GROQ_API_KEY` | – | Groq API key (free tier). Without any key, only *Write SQL* mode works. |
 | `LLM_PROVIDER` | `auto` | `auto` (Claude if its key is set, else Groq), `anthropic`, or `groq`. |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model used to write SQL. |
+| `GROQ_FALLBACK_MODEL` | `openai/gpt-oss-20b` | Used right away when the main Groq model hits its free-tier limit. |
+| `AUTO_ROUTE` | `true` | Answer from another database when the selected one doesn't have the data. |
 | `CLAUDE_MODEL` | `claude-opus-5-5` | Claude model used to write SQL. |
 | `CLAUDE_EFFORT` | `medium` | How hard Claude thinks: `low`, `medium`, `high`, `xhigh`, `max`. Higher is slower but better on hard questions. |
 | `CLAUDE_FALLBACKS` | `true` | If the model declines a request, retry on a fallback model automatically. |
-| `MAX_FIX_ATTEMPTS` | `2` | How many times the AI may repair a failing query. |
+| `MAX_FIX_ATTEMPTS` | `3` | How many times the AI may repair a failing query. |
 | `MAX_ROWS` | `1000` | Most rows returned per query. |
 | `QUERY_TIMEOUT_SECONDS` | `15` | Queries running longer are stopped. |
 | `MAX_UPLOAD_MB` | `50` | Largest file you can upload. |
@@ -145,7 +152,9 @@ Browser (React)  ──question──▶  FastAPI  ──schema + question──
    functions like `load_extension` or `pg_sleep`).
 4. The query runs on a **read-only** connection (SQLite opens files with `mode=ro` and `query_only`; PostgreSQL and
    MySQL use read-only transactions), with a timeout and a row limit.
-5. If the database reports an error, the error goes back to Claude, which writes a corrected query.
+5. If the database reports an error, the error goes back to the AI, which writes a corrected query.
+6. If the selected database doesn't have the data, the AI is shown a short list of every database's tables and
+   picks the one that does; the question is answered there and the answer says which database it came from.
 
 ## Project structure
 
@@ -160,7 +169,7 @@ backend/
     importer.py    CSV → SQLite import with type detection
     history.py     query history (stored in data/app.db)
     seed.py        builds the sample e-commerce database (and lists all samples)
-    seed_school.py builds the sample school database
+    seed_school.py, seed_company.py, seed_government.py   the other sample databases
     config.py      settings from .env
   tests/           pytest suite (no API key needed; Claude is mocked)
 frontend/
@@ -192,7 +201,7 @@ Tests and checks:
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-pytest                          # 97 tests: SQL safety, schema reading, CSV import, API, Claude + Groq requests
+pytest                          # 110 tests: SQL safety, schemas, CSV import, API, routing, Claude + Groq requests
 ruff check .
 
 cd ../frontend

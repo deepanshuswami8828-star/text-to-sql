@@ -17,10 +17,11 @@ def test_health_without_api_key(client_without_llm):
 
 def test_list_databases_and_schema(client):
     dbs = client.get("/api/databases").json()
-    assert [d["id"] for d in dbs] == ["ecommerce", "school"]
-    assert dbs[0] == {
+    assert [d["id"] for d in dbs] == ["company", "ecommerce", "government", "school"]
+    ecommerce = next(d for d in dbs if d["id"] == "ecommerce")
+    assert ecommerce == {
         "id": "ecommerce", "name": "E-commerce (sample)", "kind": "sample", "dialect": "sqlite",
-        "description": dbs[0]["description"], "deletable": False,
+        "description": ecommerce["description"], "deletable": False,
     }
     schema = client.get("/api/databases/ecommerce/schema").json()
     assert schema["dialect"] == "sqlite"
@@ -165,7 +166,7 @@ def test_upload_csv_query_add_table_and_delete(client, tmp_path):
     assert examples and all(isinstance(q, str) for q in examples)
 
     assert client.delete("/api/databases/sales_2025").status_code == 204
-    assert [d["id"] for d in client.get("/api/databases").json()] == ["ecommerce", "school"]
+    assert "sales_2025" not in [d["id"] for d in client.get("/api/databases").json()]
 
 
 def test_upload_sqlite_database(client, tmp_path):

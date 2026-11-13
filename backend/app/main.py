@@ -146,7 +146,7 @@ def create_app(settings: Settings | None = None, generator: SQLGenerator | None 
         response = answer_question(req, reg, request.app.state.generator, settings)
         if response.answerable and response.sql:
             response.history_id = history(request).add(
-                database_id=req.database_id,
+                database_id=response.database_id,
                 question=req.question,
                 sql=response.sql,
                 explanation=response.explanation,

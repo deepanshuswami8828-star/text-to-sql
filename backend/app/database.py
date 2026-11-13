@@ -366,6 +366,24 @@ class DatabaseRegistry:
             self._prompts[db_id] = prompt
         return prompt
 
+    def catalog_text(self, exclude: str | None = None, max_tables: int = 40, max_columns: int = 20) -> str:
+        """Short description of every database (id, about, tables and columns), used to pick
+        which database can answer a question."""
+        blocks = []
+        for info in self.list():
+            if info.id == exclude:
+                continue
+            try:
+                schema = self.schema(info.id)
+            except Exception as e:  # an unreachable external database shouldn't break routing
+                log.info("Skipping %s in catalog: %s", info.id, e)
+                continue
+            tables = "; ".join(
+                f"{t.name}({', '.join(c.name for c in t.columns[:max_columns])})" for t in schema.tables[:max_tables]
+            )
+            blocks.append(f"- id: {info.id}\n  name: {info.name}\n  about: {info.description}\n  tables: {tables}")
+        return "\n".join(blocks)
+
     # ---------- execution ----------
 
     def execute(self, db_id: str, sql: str) -> tuple[str, QueryResult]:

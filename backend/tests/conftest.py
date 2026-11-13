@@ -52,13 +52,19 @@ class FakeGenerator:
     def __init__(self, script: list[Generation] | Callable[..., Generation] | None = None):
         self.script = script
         self.calls: list[dict] = []
+        self.route_to: str | None = None
+        self.route_calls: list[dict] = []
+
+    def route(self, *, question: str, catalog: str) -> str | None:
+        self.route_calls.append(dict(question=question, catalog=catalog))
+        return self.route_to
 
     def generate(self, *, dialect: str, schema: str, question: str,
                  history: list[HistoryTurn], failures: list[Failure]) -> Generation:
         self.calls.append(dict(dialect=dialect, schema=schema, question=question,
                                history=history, failures=list(failures)))
         if callable(self.script):
-            return self.script(question=question, failures=failures)
+            return self.script(question=question, failures=failures, schema=schema)
         if self.script:
             return self.script[min(len(self.calls), len(self.script)) - 1]
         return Generation(answerable=True, sql="SELECT COUNT(*) AS n FROM customers",

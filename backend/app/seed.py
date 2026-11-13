@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import seed_school
+from . import seed_company, seed_government, seed_school
 
 SCHEMA = """
 CREATE TABLE categories (
@@ -362,6 +362,22 @@ SAMPLE_DATABASES = [
         description="School with students, classes, subjects, teachers, exam marks and attendance for 2025-26.",
         builder=seed_school.build,
         questions=seed_school.SAMPLE_QUESTIONS,
+    ),
+    SampleDatabase(
+        id="company",
+        name="Company (sample)",
+        description="A fictional IT company's HR data: employees, departments, salaries and payroll, projects, "
+                    "leaves and performance reviews. Amounts in INR.",
+        builder=seed_company.build,
+        questions=seed_company.SAMPLE_QUESTIONS,
+    ),
+    SampleDatabase(
+        id="government",
+        name="Government (sample)",
+        description="Indian states and districts with welfare scheme budgets, hospitals and citizen grievances. "
+                    "Practice data: figures are approximate or synthetic, not official statistics.",
+        builder=seed_government.build,
+        questions=seed_government.SAMPLE_QUESTIONS,
     ),
 ]
 SAMPLES_BY_ID = {s.id: s for s in SAMPLE_DATABASES}

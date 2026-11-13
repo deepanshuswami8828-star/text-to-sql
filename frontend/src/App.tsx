@@ -148,7 +148,7 @@ export default function App() {
   const ask = async (text: string) => {
     if (!dbId || !text.trim()) return;
     const context: HistoryTurn[] = turns
-      .filter((t) => t.status === "done" && t.sql && !t.error)
+      .filter((t) => t.status === "done" && t.sql && !t.error && !t.routedFrom)
       .slice(-MAX_CONTEXT_TURNS)
       .map((t) => ({ question: t.question ?? "(query written by the user)", sql: t.sql }));
     const turn: Turn = { id: newId(), databaseId: dbId, mode: "ai", question: text.trim(), sql: "", status: "thinking" };
@@ -165,12 +165,28 @@ export default function App() {
         error: r.error,
         attempts: r.attempts,
         historyId: r.history_id,
+        queryDb: r.database_id,
+        routedFrom: r.routed_from,
       });
     } catch (e) {
       patchTurn(dbId, turn.id, { status: "done", error: errorMessage(e) });
     }
     refreshHistory();
   };
+
+  // Move an answer that came from another database into that database's conversation and switch to it.
+  const switchToAnswerDb = (turn: Turn) => {
+    const target = turn.queryDb;
+    if (!target || target === turn.databaseId) return;
+    setTurnsByDb((all) => ({
+      ...all,
+      [turn.databaseId]: (all[turn.databaseId] ?? []).filter((t) => t.id !== turn.id),
+      [target]: [...(all[target] ?? []), { ...turn, databaseId: target, routedFrom: null }],
+    }));
+    setDbId(target);
+  };
+
+  const dbName = (id: string) => databases.find((d) => d.id === id)?.name ?? id;
 
   const runSql = async (sql: string, label?: string) => {
     if (!dbId || !sql.trim()) return;
@@ -188,7 +204,7 @@ export default function App() {
   const rerun = async (turn: Turn, sql: string) => {
     patchTurn(turn.databaseId, turn.id, { status: "running" });
     try {
-      const r = await api.execute({ database_id: turn.databaseId, sql, question: turn.question });
+      const r = await api.execute({ database_id: turn.queryDb ?? turn.databaseId, sql, question: turn.question });
       patchTurn(turn.databaseId, turn.id, {
         status: "done",
         sql: r.sql,
@@ -406,7 +422,16 @@ export default function App() {
                   </button>
                 </div>
                 {turns.map((t) => (
-                  <TurnCard key={t.id} turn={t} schema={schema} dialect={db?.dialect ?? "sqlite"} theme={theme} onRun={rerun} />
+                  <TurnCard
+                    key={t.id}
+                    turn={t}
+                    schema={schema}
+                    dialect={db?.dialect ?? "sqlite"}
+                    theme={theme}
+                    onRun={rerun}
+                    dbName={dbName}
+                    onSwitchDb={switchToAnswerDb}
+                  />
                 ))}
               </>
             )}

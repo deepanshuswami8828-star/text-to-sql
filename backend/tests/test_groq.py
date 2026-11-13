@@ -44,7 +44,7 @@ class Recorder:
 def _generator(rec: Recorder) -> GroqSQLGenerator:
     settings = Settings(_env_file=None, llm_provider="groq", groq_api_key="test-key")
     client = groq.Groq(api_key="test-key", max_retries=0, http_client=httpx.Client(transport=httpx.MockTransport(rec)))
-    return GroqSQLGenerator(settings, client=client)
+    return GroqSQLGenerator(settings, client=client, patient_retries=0)
 
 
 def _ok(answer: dict) -> httpx.Response:
@@ -99,6 +99,52 @@ def test_groq_cut_off_answer():
     rec = Recorder([httpx.Response(200, json=_completion('{"answerable": true, "sql": "SEL', finish_reason="length"))])
     with pytest.raises(LLMError, match="cut off"):
         _generator(rec).generate(dialect="sqlite", schema="", question="q", history=[], failures=[])
+
+
+def test_groq_falls_back_to_second_model_when_rate_limited():
+    rec = Recorder([
+        httpx.Response(429, json={"error": {"message": "rate limit", "type": "tokens"}}),
+        _ok({"answerable": True, "sql": "SELECT 1", "explanation": ""}),
+    ])
+    gen = _generator(rec).generate(dialect="sqlite", schema="", question="q", history=[], failures=[])
+    assert gen.sql == "SELECT 1"
+    assert [rec.body(i)["model"] for i in range(2)] == ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+
+
+def test_groq_waits_once_when_every_model_is_rate_limited():
+    limited = httpx.Response(429, headers={"retry-after": "0"}, json={"error": {"message": "rate limit"}})
+    rec = Recorder([limited, limited, _ok({"answerable": True, "sql": "SELECT 3", "explanation": ""})])
+    gen = _generator(rec)
+    gen.patient_retries = 1
+    assert gen.generate(dialect="sqlite", schema="", question="q", history=[], failures=[]).sql == "SELECT 3"
+    assert [rec.body(i)["model"] for i in range(3)] == [
+        "openai/gpt-oss-120b", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+
+
+def test_groq_falls_back_when_answer_is_not_json():
+    rec = Recorder([
+        httpx.Response(200, json=_completion("Sorry, I can't format that.")),
+        _ok({"answerable": True, "sql": "SELECT 2", "explanation": ""}),
+    ])
+    gen = _generator(rec).generate(dialect="sqlite", schema="", question="q", history=[], failures=[])
+    assert gen.sql == "SELECT 2"
+
+
+def test_groq_bad_key_is_not_retried():
+    rec = Recorder([httpx.Response(401, json={"error": {"message": "invalid key"}})])
+    with pytest.raises(LLMError):
+        _generator(rec).generate(dialect="sqlite", schema="", question="q", history=[], failures=[])
+    assert len(rec.requests) == 1
+
+
+def test_groq_route():
+    rec = Recorder([_ok({"database_id": "school"}), _ok({"database_id": ""})])
+    g = _generator(rec)
+    assert g.route(question="students ke marks", catalog="- id: school\n  tables: marks(...)") == "school"
+    body = rec.body(0)
+    assert body["messages"][0]["role"] == "system" and "which database" in body["messages"][0]["content"]
+    assert "- id: school" in body["messages"][1]["content"] and "students ke marks" in body["messages"][1]["content"]
+    assert g.route(question="weather", catalog="- id: school") is None
 
 
 def test_parse_answer_tolerates_wrapping():

@@ -57,6 +57,8 @@ export interface HistoryTurn {
 
 export interface GenerateResponse {
   question: string;
+  database_id: string;
+  routed_from: string | null;
   answerable: boolean;
   sql: string;
   explanation: string;
@@ -108,7 +110,10 @@ export interface Turn {
   error?: string | null;
   attempts?: Attempt[];
   historyId?: number | null;
-  /** "thinking": waiting for Claude; "running": re-running edited SQL; "done": finished */
+  /** The database the SQL runs on, when the answer came from a different database than the selected one. */
+  queryDb?: string;
+  routedFrom?: string | null;
+  /** "thinking": waiting for the AI; "running": re-running edited SQL; "done": finished */
   status: "thinking" | "running" | "done";
 }
 

@@ -665,6 +665,21 @@ h2 {
   flex: none;
   margin-top: 2px;
 }
+.notice.routed {
+  background: var(--info-soft);
+  border: 1px solid var(--border);
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 6px 6px 12px;
+}
+.notice.routed svg {
+  color: var(--accent);
+  flex: none;
+}
+.notice.routed span {
+  flex: 1;
+  min-width: 200px;
+}
 .notice.subtle {
   padding: 0 2px;
   color: var(--ink-2);
