@@ -25,11 +25,11 @@ from sqlalchemy.pool import NullPool
 from .config import Settings
 from .importer import UploadError, check_sqlite_file, import_csv, slugify
 from .schemas import ColumnOut, DatabaseOut, QueryResult, SchemaOut, TableOut
+from .seed import SAMPLE_DATABASES
 from .sql_guard import to_sqlglot_dialect, validate_read_only
 
 log = logging.getLogger(__name__)
 
-SAMPLE_ID = "ecommerce"
 SQLITE_EXTENSIONS = {".db", ".sqlite", ".sqlite3"}
 CSV_EXTENSIONS = {".csv", ".tsv", ".txt"}
 SAMPLE_ROWS_PER_TABLE = 3
@@ -123,16 +123,17 @@ class DatabaseRegistry:
         s = self.settings
         dbs: dict[str, DatabaseInfo] = {}
 
-        sample_path = s.sample_dir / f"{SAMPLE_ID}.db"
-        if sample_path.exists():
-            dbs[SAMPLE_ID] = DatabaseInfo(
-                id=SAMPLE_ID,
-                name="E-commerce (sample)",
-                kind="sample",
-                dialect="sqlite",
-                description="Online store with customers, products, orders, employees and reviews. Prices in INR.",
-                path=sample_path,
-            )
+        for sample in SAMPLE_DATABASES:
+            sample_path = s.sample_dir / f"{sample.id}.db"
+            if sample_path.exists():
+                dbs[sample.id] = DatabaseInfo(
+                    id=sample.id,
+                    name=sample.name,
+                    kind="sample",
+                    dialect="sqlite",
+                    description=sample.description,
+                    path=sample_path,
+                )
 
         for name, url in s.external_databases().items():
             db_id = self._unique_id(slugify(name, "db"), dbs)
@@ -276,8 +277,9 @@ class DatabaseRegistry:
             if (is_sqlite and kind == "table" and row_count and self._looks_textual(col_type)
                     and c["name"] not in pk_cols):
                 values = self._distinct_values(conn, name, c["name"])
-                # Only categorical columns (values repeat) are worth listing, not names/ids.
-                if values and row_count < 2 * len(values):
+                # List values of categorical columns (values repeat) and of small lookup tables
+                # (e.g. exam names), but not names/ids in bigger tables.
+                if values and row_count < 2 * len(values) and row_count > MAX_DISTINCT_VALUES:
                     values = None
             columns.append(ColumnOut(
                 name=c["name"],

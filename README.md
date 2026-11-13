@@ -23,7 +23,9 @@ It's a website that runs on your computer: start it and open **http://localhost:
 - **Schema browser** with tables, columns, keys, relationships and one-click previews.
 - **History** of every question and query, with stars for the ones you want to keep.
 - **Light and dark themes**, works on phones too.
-- Ships with a **sample e-commerce database** (customers, products, orders, reviews in INR) so you can try it immediately.
+- Ships with **two sample databases** so you can try it immediately:
+  - **E-commerce**: customers, products, orders, employees and reviews (prices in INR)
+  - **School**: students, classes, subjects, teachers, exam marks and monthly attendance for 2025-26
 
 ![Dark theme with a results table](docs/answer-table-dark.png)
 
@@ -157,7 +159,8 @@ backend/
     sql_guard.py   read-only SQL validation
     importer.py    CSV → SQLite import with type detection
     history.py     query history (stored in data/app.db)
-    seed.py        builds the sample e-commerce database
+    seed.py        builds the sample e-commerce database (and lists all samples)
+    seed_school.py builds the sample school database
     config.py      settings from .env
   tests/           pytest suite (no API key needed; Claude is mocked)
 frontend/
@@ -189,7 +192,7 @@ Tests and checks:
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-pytest                          # 96 tests: SQL safety, schema reading, CSV import, API, Claude + Groq requests
+pytest                          # 97 tests: SQL safety, schema reading, CSV import, API, Claude + Groq requests
 ruff check .
 
 cd ../frontend

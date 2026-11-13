@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .config import Settings, get_settings
-from .database import SAMPLE_ID, DatabaseNotFound, DatabaseRegistry, QueryError
+from .database import DatabaseNotFound, DatabaseRegistry, QueryError
 from .history import HistoryStore
 from .importer import UploadError
 from .llm import LLMError, SQLGenerator, make_generator
@@ -28,7 +28,7 @@ from .schemas import (
     HistoryUpdate,
     SchemaOut,
 )
-from .seed import SAMPLE_QUESTIONS, ensure_sample_database
+from .seed import SAMPLES_BY_ID, ensure_sample_databases
 from .service import answer_question
 from .sql_guard import UnsafeSQLError
 
@@ -41,7 +41,7 @@ def create_app(settings: Settings | None = None, generator: SQLGenerator | None 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         settings.data_dir.mkdir(parents=True, exist_ok=True)
-        ensure_sample_database(settings.sample_dir / f"{SAMPLE_ID}.db")
+        ensure_sample_databases(settings.sample_dir)
         registry = DatabaseRegistry(settings)
         registry.refresh()
         app.state.registry = registry
@@ -113,8 +113,8 @@ def create_app(settings: Settings | None = None, generator: SQLGenerator | None 
     def get_examples(database_id: str, request: Request):
         reg = registry(request)
         info = reg.get(database_id)
-        if info.kind == "sample":
-            return SAMPLE_QUESTIONS
+        if info.kind == "sample" and info.id in SAMPLES_BY_ID:
+            return SAMPLES_BY_ID[info.id].questions
         return example_questions(reg.schema(database_id))
 
     @app.post("/api/databases/upload", response_model=DatabaseOut, status_code=201)

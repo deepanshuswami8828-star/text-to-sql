@@ -1,7 +1,8 @@
-"""Generate the bundled sample database: a small e-commerce store (prices in INR).
+"""Generate the bundled sample databases: an e-commerce store (prices in INR) and a school
+(see seed_school.py).
 
 The data is random but deterministic (fixed seed), so the same questions give the
-same answers on every machine. Run directly to rebuild it:
+same answers on every machine. Run directly to rebuild them:
 
     python -m app.seed --force
 """
@@ -14,8 +15,12 @@ import os
 import random
 import sqlite3
 import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+
+from . import seed_school
 
 SCHEMA = """
 CREATE TABLE categories (
@@ -305,8 +310,8 @@ def build(path: Path, seed: int = 42) -> None:
         conn.close()
 
 
-def ensure_sample_database(path: Path, force: bool = False) -> Path:
-    """Create the sample database at `path` if it doesn't exist (or if force=True)."""
+def ensure_sample_database(path: Path, force: bool = False, builder: Callable[[Path], None] = build) -> Path:
+    """Create a sample database at `path` with `builder` if it doesn't exist (or if force=True)."""
     if path.exists() and not force:
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -315,12 +320,21 @@ def ensure_sample_database(path: Path, force: bool = False) -> Path:
     tmp_path = Path(tmp)
     try:
         tmp_path.unlink()  # sqlite wants to create the file itself
-        build(tmp_path)
+        builder(tmp_path)
         os.replace(tmp_path, path)
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
     return path
+
+
+@dataclass(frozen=True)
+class SampleDatabase:
+    id: str
+    name: str
+    description: str
+    builder: Callable[[Path], None]
+    questions: list[str]
 
 
 SAMPLE_QUESTIONS = [
@@ -334,13 +348,36 @@ SAMPLE_QUESTIONS = [
     "Which products are low on stock (fewer than 10 units)?",
 ]
 
+SAMPLE_DATABASES = [
+    SampleDatabase(
+        id="ecommerce",
+        name="E-commerce (sample)",
+        description="Online store with customers, products, orders, employees and reviews. Prices in INR.",
+        builder=build,
+        questions=SAMPLE_QUESTIONS,
+    ),
+    SampleDatabase(
+        id="school",
+        name="School (sample)",
+        description="School with students, classes, subjects, teachers, exam marks and attendance for 2025-26.",
+        builder=seed_school.build,
+        questions=seed_school.SAMPLE_QUESTIONS,
+    ),
+]
+SAMPLES_BY_ID = {s.id: s for s in SAMPLE_DATABASES}
+
+
+def ensure_sample_databases(sample_dir: Path, force: bool = False) -> None:
+    for sample in SAMPLE_DATABASES:
+        ensure_sample_database(sample_dir / f"{sample.id}.db", force=force, builder=sample.builder)
+
 
 if __name__ == "__main__":
     from .config import get_settings
 
-    parser = argparse.ArgumentParser(description="Build the sample e-commerce database.")
-    parser.add_argument("--force", action="store_true", help="Rebuild even if it already exists")
+    parser = argparse.ArgumentParser(description="Build the sample databases.")
+    parser.add_argument("--force", action="store_true", help="Rebuild even if they already exist")
     args = parser.parse_args()
-    target = get_settings().sample_dir / "ecommerce.db"
-    ensure_sample_database(target, force=args.force)
-    print(f"Sample database ready at {target}")
+    sample_dir = get_settings().sample_dir
+    ensure_sample_databases(sample_dir, force=args.force)
+    print(f"Sample databases ready in {sample_dir}")

@@ -17,10 +17,11 @@ def test_health_without_api_key(client_without_llm):
 
 def test_list_databases_and_schema(client):
     dbs = client.get("/api/databases").json()
-    assert dbs == [{
+    assert [d["id"] for d in dbs] == ["ecommerce", "school"]
+    assert dbs[0] == {
         "id": "ecommerce", "name": "E-commerce (sample)", "kind": "sample", "dialect": "sqlite",
         "description": dbs[0]["description"], "deletable": False,
-    }]
+    }
     schema = client.get("/api/databases/ecommerce/schema").json()
     assert schema["dialect"] == "sqlite"
     assert {t["name"] for t in schema["tables"]} >= {"orders", "customers"}
@@ -35,6 +36,8 @@ def test_unknown_database_is_404(client):
 def test_examples_for_sample(client):
     examples = client.get("/api/databases/ecommerce/examples").json()
     assert len(examples) >= 5 and all(isinstance(q, str) for q in examples)
+    school = client.get("/api/databases/school/examples").json()
+    assert school[0] == "Find the average marks of students in each subject"
 
 
 def test_execute_success_is_saved_to_history(client):
@@ -162,7 +165,7 @@ def test_upload_csv_query_add_table_and_delete(client, tmp_path):
     assert examples and all(isinstance(q, str) for q in examples)
 
     assert client.delete("/api/databases/sales_2025").status_code == 204
-    assert [d["id"] for d in client.get("/api/databases").json()] == ["ecommerce"]
+    assert [d["id"] for d in client.get("/api/databases").json()] == ["ecommerce", "school"]
 
 
 def test_upload_sqlite_database(client, tmp_path):

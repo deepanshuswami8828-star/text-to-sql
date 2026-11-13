@@ -9,10 +9,38 @@ from app.importer import UploadError
 from app.sql_guard import UnsafeSQLError
 
 
-def test_sample_database_is_registered(registry: DatabaseRegistry):
+def test_sample_databases_are_registered(registry: DatabaseRegistry):
     ids = [d.id for d in registry.list()]
-    assert ids == ["ecommerce"]
+    assert ids == ["ecommerce", "school"]
     assert registry.get("ecommerce").kind == "sample"
+    assert registry.get("school").name == "School (sample)"
+
+
+def test_school_sample_schema_and_queries(registry: DatabaseRegistry):
+    tables = {t.name: t for t in registry.schema("school").tables}
+    assert set(tables) == {"subjects", "teachers", "classes", "students", "exams", "marks", "attendance"}
+    assert tables["students"].row_count == 240
+    marks_cols = {c.name: c for c in tables["marks"].columns}
+    assert marks_cols["marks_obtained"].nullable
+    assert marks_cols["subject_id"].foreign_key == "subjects.subject_id"
+    exam_names = {c.name: c for c in tables["exams"].columns}["name"].values
+    assert exam_names == ["Final", "Half Yearly", "Unit Test 1", "Unit Test 2"]
+    assert "NULL means the student was absent" in registry.schema_prompt("school")
+
+    _, result = registry.execute(
+        "school",
+        "SELECT s.name, ROUND(AVG(m.marks_obtained), 1) AS avg_marks FROM marks m "
+        "JOIN subjects s ON s.subject_id = m.subject_id GROUP BY s.name",
+    )
+    assert result.row_count == 12
+    assert all(30 < avg < 90 for _, avg in result.rows)
+    # some students attend poorly, so "attendance below 75%" has answers
+    _, low = registry.execute(
+        "school",
+        "SELECT student_id FROM attendance GROUP BY student_id "
+        "HAVING 100.0 * SUM(days_present) / SUM(working_days) < 75",
+    )
+    assert low.row_count > 0
 
 
 def test_schema_introspection(registry: DatabaseRegistry):
